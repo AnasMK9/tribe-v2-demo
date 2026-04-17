@@ -13,6 +13,8 @@ hardware: t4-small
 
 # TRIBE v2 — Neuromarketing Creative Analyzer
 
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AnasMK9/tribe-v2-neuromarketing/blob/main/colab_demo.ipynb) [![HF Space](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Space-blue)](https://huggingface.co/spaces/anasmk9/tribe-v2-neuromarketing)
+
 Upload a 15–60s video ad. Get a predicted neural response on Meta's TRIBE v2 brain encoder, broken down by region, over time, with plain-English interpretation for marketers.
 
 ## What this does
