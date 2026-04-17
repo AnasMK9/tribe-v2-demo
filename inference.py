@@ -46,11 +46,87 @@ def _pick_device() -> str:
     return "cpu"
 
 
+def _patch_whisperx_for_non_cuda() -> None:
+    """TRIBE v2 hardcodes whisperx `--compute_type float16 --device cuda-or-cpu`.
+
+    On Apple Silicon or any non-CUDA machine, ctranslate2's CPU backend rejects
+    float16. Patch the transform so we pass `int8` on CPU. No-op on CUDA.
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return  # CUDA path already works with float16
+    except ImportError:
+        pass
+
+    try:
+        from tribev2 import eventstransforms as _et
+    except ImportError:
+        return
+
+    if getattr(_et.ExtractWordsFromAudio._get_transcript_from_audio, "_tribe_patched", False):
+        return
+
+    _original = _et.ExtractWordsFromAudio._get_transcript_from_audio
+
+    @staticmethod
+    def _patched(wav_filename, language):
+        # Rebuild the exact command the original method would build, but swap
+        # compute_type float16 → int8 so ctranslate2 CPU backend accepts it.
+        import json, os as _os, subprocess, tempfile
+        from pathlib import Path as _Path
+
+        language_codes = dict(english="en", french="fr", spanish="es", dutch="nl", chinese="zh")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute_type = "float16" if device == "cuda" else "int8"
+
+        import pandas as _pd
+        with tempfile.TemporaryDirectory() as output_dir:
+            cmd = [
+                "uvx", "whisperx", str(wav_filename),
+                "--model", "large-v3",
+                "--language", language_codes[language],
+                "--device", device,
+                "--compute_type", compute_type,
+                "--batch_size", "16",
+                "--align_model", "WAV2VEC2_ASR_LARGE_LV60K_960H" if language == "english" else "",
+                "--output_dir", output_dir,
+                "--output_format", "json",
+            ]
+            cmd = [c for c in cmd if c]
+            env = {k: v for k, v in _os.environ.items() if k != "MPLBACKEND"}
+            result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+            if result.returncode != 0:
+                raise RuntimeError(f"whisperx failed:\n{result.stderr}")
+            json_path = _Path(output_dir) / f"{_Path(wav_filename).stem}.json"
+            transcript = json.loads(json_path.read_text())
+
+        words = []
+        for i, segment in enumerate(transcript["segments"]):
+            sentence = segment["text"].replace('"', "")
+            for word in segment.get("words", []):
+                if "start" not in word:
+                    continue
+                words.append({
+                    "text": word["word"].replace('"', ""),
+                    "start": word["start"],
+                    "duration": word["end"] - word["start"],
+                    "sequence_id": i,
+                    "sentence": sentence,
+                })
+        return _pd.DataFrame(words)
+
+    _patched.__func__._tribe_patched = True
+    _et.ExtractWordsFromAudio._get_transcript_from_audio = _patched
+
+
 def get_model():
     """Lazy-load TRIBE v2. Cached — subsequent calls are free."""
     global _MODEL, _DEVICE
     if _MODEL is not None:
         return _MODEL
+
+    _patch_whisperx_for_non_cuda()
 
     from tribev2 import TribeModel
 
