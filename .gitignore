@@ -6,5 +6,6 @@ __pycache__/
 checkpoints/
 cache/
 *.mp4
+*.wav
 !assets/*.mp4
 firebase-debug.log
